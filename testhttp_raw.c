@@ -120,17 +120,18 @@ char *build_request(char *address, char *file_name) {
 
     int file_size = get_file_size_in_chars(file);
     char cookies[file_size + ((file_size + 1) / 3)];
+    memset(cookies, 0, sizeof(cookies));
     get_cookies_header(file, cookies);
 
     fclose(file);
 
     int host_len = get_host_len(address_suff);
     int target_len = get_target_len(address_suff, host_len);
-    char host[host_len];
-    char target[target_len];
+    char host[host_len + 1];
+    char target[target_len + 1];
     char *request = NULL;
-    int request_len = (3 + 1 + target_len + 1 + 8 + 1 + 5 + host_len + 2 + 18 + 4 + file_size + ((file_size + 1) / 3));
-
+    int request_len = 8192;
+    
     if (sscanf(address_suff, "%[^/]%s", host, target) != 2) {
         fatal("wrong third argument");
     }
@@ -140,15 +141,19 @@ char *build_request(char *address, char *file_name) {
         syserr("malloc");
     }
 
-    strcat(request, "GET ");
-    strcat(request, target);
-    strcat(request, " HTTP/1.1\r\n");
-    strcat(request, "Host: ");
-    strcat(request, host);
-    strcat(request, "\r\n");
-    strcat(request, "Cookie: ");
-    strcat(request, cookies);
-    strcat(request, "\r\n");
+    // sprintf(request, "GET %s HTTP/1.1\r\nHost: %s\r\nCookie: %s\r\nConnection: close\r\n\r\n", target, host, cookies);
+    sprintf(request, "GET %s HTTP/1.1\r\nHost: %s\r\n", target, host);
+    // strcat(request, "GET ");
+    // strcat(request, target);
+    // strcat(request, " HTTP/1.1\r\n");
+    // strcat(request, "Host: ");
+    // strcat(request, host);
+    // strcat(request, "\r\n");
+    if (file_size > 0) {
+        strcat(request, "Cookie: ");
+        strcat(request, cookies);
+        strcat(request, "\r\n");
+    }
     strcat(request, "Connection: close\r\n");
     strcat(request, "\r\n");
     
@@ -158,47 +163,80 @@ char *build_request(char *address, char *file_name) {
 // Wywoływać dopiero, gdy już nie będzie nam potrzebny header.
 void print_cookies(char *header) {
     char *cookie = strcasestr(header, "Set-Cookie");
-    char *end_of_cookie;
+    char *end_of_cookie = NULL;
+    int cookie_counter = 0;
+    char cookies[strlen(header)]; // Jakies lepsze oszacowanie moze!!!!!!!!
 
+    memset(cookies, 0, sizeof(cookies));
     while (cookie != NULL) {
-        cookie += 12;
+        cookie_counter++;
+        cookie += 12;   // JAKIS DEFINE!!!!!!!!!!
         end_of_cookie = cookie;
         while ((*end_of_cookie != ';') && (*end_of_cookie != '\r')) {
             end_of_cookie++;
         }
         *end_of_cookie = '\0';
-        printf("%s\n", cookie);
+        strcat(cookies, cookie);
+        strcat(cookies, "\n");
         cookie = end_of_cookie + 1;
         cookie = strcasestr(cookie, "Set-Cookie");
     }
+
+    printf("%d\n", cookie_counter);
+    if (cookie_counter > 0) {
+        printf("%s", cookies);
+    }
 }
 
-void generate_report(char *header) {
-    if (strncmp(header, CORRECT_RESPONSE, CORRECT_RESPONSE_LEN) != 0) {
-        char *info_end = strstr(header, "\r\n");
+size_t count_size_chunked(char *content, int sock) {
+    char buffer[BUFFER_SIZE];
+    size_t chunk_size = 0, sum = 0;
+    ssize_t rcv_len = 0;
+    char *number_start = NULL, *number_end = NULL;
+    strcpy(buffer, content);
+
+    do {
+        if (rcv_len < 0) {
+            syserr("read");
+        }
+
+        number_end = buffer;
+        while ((number_start = strstr(number_end, "\r\n")) != NULL) {
+            number_start += 2;
+            chunk_size = strtoul(number_start, &number_end, 16);
+            if (chunk_size == 0) {
+                break;
+            }
+
+            sum += chunk_size;
+            number_end = strchr(number_end, '\n');
+        }
+
+        memset(buffer, 0, sizeof(buffer));
+        strcpy(buffer, "\r\n");
+    } while ((rcv_len = read(sock, buffer + 2, sizeof(buffer) - 3)));
+
+    return sum;
+}
+
+void generate_report(char *buffer, int sock) {
+    char *end_of_header = strstr(buffer, "\r\n\r\n");
+    end_of_header++;
+    *end_of_header = '\0';
+    //puts(buffer);
+
+    if (strncmp(buffer, CORRECT_RESPONSE, CORRECT_RESPONSE_LEN) != 0) {
+        char *info_end = strstr(buffer, "\r\n");
         *info_end = '\0';
-        printf("%s\n", header);
+        printf("%s\n", buffer);
     } else {
-        if (strcasestr(header, CHUNKED_MSG) != NULL) {
-            print_cookies(header);
-            printf("chunked\n");
+        if (strcasestr(buffer, CHUNKED_MSG) != NULL) {
+            print_cookies(buffer);
+            printf("Dlugosc zasobu: %lu\n", count_size_chunked(end_of_header + 1, sock));
         } else {
-            print_cookies(header);
+            print_cookies(buffer);
             printf("normal");
         }
-        
-        //printf("%s\n", header);
-
-        // char *number = strstr(buffer, "\r\n\r\n");
-        // number += 4;
-        // char *end = strstr(number, "\r\n");
-        // *end = '\0';
-        // printf("%s", number);
-
-        // int size = 0;
-        // sscanf(buffer, "\r\n\r\n%d", &size);
-        // printf("%d\n", size);        
-        
     }
 }
 
@@ -268,12 +306,8 @@ int main(int argc, char *argv[]) {
         syserr("read");
     }
 
-    char *end_of_header = strstr(buffer, "\r\n\r\n");
-    end_of_header += 3;
-    *end_of_header = '\0';
-
     //printf("%s", buffer);
-    generate_report(buffer);
+    generate_report(buffer, sock);
     
     // while ((rcv_len = read(sock, buffer, sizeof(buffer) - 1)) > 0) {
     //     printf("%s\n", buffer);
