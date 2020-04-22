@@ -5,16 +5,17 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <stdbool.h>
 #include "err.h"
 
 #define METHOD_LEN 3
 #define HTTP_VERSION_LEN 8
-#define BUFFER_SIZE 8192   // 8 kb
+#define BUFFER_SIZE 8192 // 8 kb
 
-#define CORRECT_RESPONSE "HTTP/1.1 200 OK\r\n"
-#define CORRECT_RESPONSE_LEN 17
+#define CORRECT_RESPONSE "HTTP/1.1 200 OK"
+#define CORRECT_RESPONSE_LEN 15
 
-#define CHUNKED_MSG "Transfer-Encoding: chunked\r\n"
+#define CHUNKED_MSG "Transfer-Encoding: chunked"
 
 int check_address(char *arg) {
     int i = 0;
@@ -188,6 +189,104 @@ void print_cookies(char *header) {
     }
 }
 
+bool is_hex_number(char *str) {
+    int i = 0;
+    char *ptr = NULL;
+
+    while ((str[i] != '\0') && (str[i] != '\r') && (str[i] != ';')) {
+        if ((str[i] >= '0' && str[i] <= '9')
+            || (str[i] >= 'a' && str[i] <= 'f')
+            || (str[i] >= 'A' && str[i] <= 'F')) {
+            i++;
+        } else {
+            return false;
+        }
+    }
+
+    if (i == 0) {
+        return false;
+    }
+
+    if ((str[i] == '\r') && (str[i + 1] != '\n')) {
+        return false;
+    }
+
+    if (str[i] == ';') {
+        ptr = strchr(str, '\n');
+        ptr--;
+        if (*ptr != '\r') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+ssize_t read_chunk_len(char *ptr) {
+    ssize_t result = 0;
+
+    if (is_hex_number(ptr)) {
+        result = strtoul(ptr, &ptr, 16);
+        return result;
+    }
+
+    return -1;
+}
+
+// char *parse_chunked_content(char *buff, int sock) {
+//     char buffer[BUFFER_SIZE];
+//     size_t chunk_size, sum = 0, content_len = 0;
+//     ssize_t rcv_len = 0;
+//     char *content = NULL, *start = NULL, *end = NULL;
+
+//     strcpy(buffer, buff);
+//     do {
+//         if (rcv_len < 0) {
+//             syserr("read");
+//         }
+
+//         start = buffer;
+//         printf("%s", start);
+//         while ((end = strstr(start, "\r\n")) != NULL) {
+//             end += 2; // przesuwamy za \r\n
+//             if (is_hex_number(end)) {
+//                 chunk_size = strtoul(end, &start, 16);
+//                 if (chunk_size == 0) {
+//                     break;
+//                 }
+//                 sum += chunk_size;
+//                 if (content_len < sum) {
+//                     content_len = (3 * sum) / 2;
+//                     content = (char *) realloc(content, content_len);
+//                 }
+//             } else {
+//                 start = end;
+//                 end = strstr(start, "\r\n");
+//                 if (end != NULL) {
+//                     *end = '\0';
+//                 }
+
+//                 strcat(content, start);
+
+//                 if (end != NULL) {
+//                     *end = '\r';
+//                     start = end;
+//                 }
+//             }
+//         }
+//         if (start == buffer) {
+//             strcat(content, start);
+//         }
+
+//         memset(buffer, 0, sizeof(buffer));
+//         strcat(buffer, "\r\n");
+//     } while ((rcv_len = read(sock, buffer + 2, sizeof(buffer) - 3)) > 0);
+
+//     printf("\n\n%lu\n\n", sum);
+
+//     return content;
+// }
+
 size_t count_size_chunked(char *content, int sock) {
     char buffer[BUFFER_SIZE];
     size_t chunk_size = 0, sum = 0;
@@ -196,6 +295,7 @@ size_t count_size_chunked(char *content, int sock) {
     strcpy(buffer, content);
 
     do {
+        //printf("%s\n", buffer);
         if (rcv_len < 0) {
             syserr("read");
         }
@@ -203,20 +303,112 @@ size_t count_size_chunked(char *content, int sock) {
         number_end = buffer;
         while ((number_start = strstr(number_end, "\r\n")) != NULL) {
             number_start += 2;
-            chunk_size = strtoul(number_start, &number_end, 16);
-            if (chunk_size == 0) {
-                break;
+            if (is_hex_number(number_start)) {
+                chunk_size = strtoul(number_start, &number_end, 16);
+                if (chunk_size == 0) {
+                    break;
+                }
+                sum += chunk_size;
             }
-
-            sum += chunk_size;
-            number_end = strchr(number_end, '\n');
+            number_end++;
         }
 
         memset(buffer, 0, sizeof(buffer));
-        strcpy(buffer, "\r\n");
-    } while ((rcv_len = read(sock, buffer + 2, sizeof(buffer) - 3)));
+        strcat(buffer, "\r\n");
+    } while ((rcv_len = read(sock, buffer + 2, sizeof(buffer) - 3)) > 0);
 
     return sum;
+}
+
+char *read_content(char *buff_content_part, int sock) {
+    size_t content_len = 0;
+    size_t sum = strlen(buff_content_part) + 1;
+    ssize_t rcv_len = 0;
+    char *content = NULL;
+    char buffer[BUFFER_SIZE];
+
+    strcpy(buffer, buff_content_part);
+    do {
+        if (rcv_len < 0) {
+            syserr("read");
+        }
+
+        sum += rcv_len;
+        if (content_len < sum) {
+            content_len = (3 * sum) / 2;
+            content = (char *) realloc(content, content_len * sizeof(char));
+            if (content == NULL) {
+                syserr("realloc");
+            }
+        }
+        strcat(content, buffer);
+        memset(buffer, 0, sizeof(buffer));
+    } while ((rcv_len = read(sock, buffer, sizeof(buffer) - 1)) > 0);
+
+    return content;
+}
+
+char *parse_chunked_content(char *content) {
+    size_t content_len = strlen(content) + 1;
+    size_t chunk_size = 0, sum = 0;
+    char *parsed_content = NULL;
+    char *start = NULL, *end = NULL;
+    bool end_of_chunk = false;
+
+    parsed_content = (char *) malloc(content_len * sizeof(char));
+    if (parsed_content == NULL) {
+        syserr("malloc");
+    }
+    for (int i = 0; i < content_len; i++) {
+        parsed_content[i] = '\0';
+    }
+    parsed_content[0] = '\0';
+
+    start = content;
+    while ((end = strstr(start, "\r\n")) != NULL) {
+        if (!is_hex_number(start)) {
+            fatal("wrong content");
+        }
+
+        chunk_size = strtoul(start, &start, 16);
+        if (chunk_size == 0) {
+            break;
+        }
+        sum += chunk_size;
+
+        start = end + 2;
+        end = start;
+        end_of_chunk = false;
+        while (!end_of_chunk) {
+            end = strstr(end, "\r\n");
+            if (is_hex_number(end + 2)) {
+                end_of_chunk = true;
+            } else {
+                end += 2;
+            }
+        }
+
+        *end = '\0';
+        strcat(parsed_content, start);
+        *end = '\r';
+        start = end + 2;
+    }
+    // while ((end = strstr(start, "\r\n")) != NULL) {
+    //     if (is_hex_number(start)) {
+    //         chunk_size = strtoul(start, &start, 16);
+    //         if (chunk_size == 0) {
+    //             break;
+    //         }
+    //         sum += chunk_size;
+    //     } else {
+    //         *end = '\0';
+    //         strcat(parsed_content, start);
+    //     }
+    //     start = end + 2;
+    // }
+    printf("%lu\n", sum);
+
+    return parsed_content;
 }
 
 void generate_report(char *buffer, int sock) {
@@ -224,18 +416,43 @@ void generate_report(char *buffer, int sock) {
     end_of_header++;
     *end_of_header = '\0';
     //puts(buffer);
-
     if (strncmp(buffer, CORRECT_RESPONSE, CORRECT_RESPONSE_LEN) != 0) {
         char *info_end = strstr(buffer, "\r\n");
         *info_end = '\0';
         printf("%s\n", buffer);
     } else {
+        //puts(buffer);
         if (strcasestr(buffer, CHUNKED_MSG) != NULL) {
             print_cookies(buffer);
-            printf("Dlugosc zasobu: %lu\n", count_size_chunked(end_of_header + 1, sock));
+            //printf("Dlugosc zasobu: %lu\n", count_size_chunked(end_of_header + 1, sock));
+            // char *jol = parse_chunked_content(end_of_header + 1, sock);
+            // printf("%s", jol);
+            // printf("%lu\n", strlen(jol));
+            char *jol = read_content(end_of_header + 3, sock);
+            //printf("%s", jol);
+            puts("JOL");
+            puts("JOL");
+            puts("JOL");
+            puts("JOL");
+            puts("JOL");
+            puts("JOL");
+            puts("JOL");
+            puts("JOL");
+            puts("JOL");
+            size_t aaa = strlen(jol) + 1;
+            char *jol2 = parse_chunked_content(jol);
+            //printf("%s\n", jol2);
+            printf("%lu\n", strlen(jol2));
+            // for (int i = 0; i < aaa; i++) {
+            //     if (jol2[i] == '\0') {
+            //         printf("NULL");
+            //     } else {
+            //         printf("%c", jol2[i]);
+            //     }
+            // }
         } else {
             print_cookies(buffer);
-            printf("normal");
+            printf("normal\n");
         }
     }
 }
