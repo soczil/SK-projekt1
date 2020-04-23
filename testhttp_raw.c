@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,10 +73,11 @@ void get_cookies_header(FILE *file, char *cookies) {
 
     char *last_space = strrchr(cookies, ' ');
     *last_space = '\0';
+    free(line);
 }
 
 char *build_request(char *address, char *file_name) {
-    int address_len = strlen(address);
+    size_t address_len = strlen(address);
     char address_suff[address_len + 1];
     
     if (sscanf(address, "http://%s", address_suff) != 1) {
@@ -93,7 +96,7 @@ char *build_request(char *address, char *file_name) {
     memset(cookies, 0, sizeof(cookies));
     get_cookies_header(file, cookies);
 
-    fclose(file);
+    fclose(file); // Tu trzeba obsluzyc blad!!!!!!!!!!!!!!!!!!!
 
     int host_len = get_host_len(address_suff);
     int target_len = get_target_len(address_suff, host_len);
@@ -185,12 +188,19 @@ bool is_hex_number(char *str) {
 }
 
 char *read_content(char *buff_content_part, int sock) {
-    size_t content_len = 0;
     size_t sum = strlen(buff_content_part) + 1;
+    size_t content_len = (3 * sum) / 2;
     ssize_t rcv_len = 0;
     char *content = NULL;
     char buffer[BUFFER_SIZE];
 
+    content = (char *) malloc(content_len * sizeof(char));
+    if (content == NULL) {
+        syserr("malloc");
+    }
+    content[0] = '\0';
+
+    buffer[0] = '\0';
     strcpy(buffer, buff_content_part);
     do {
         if (rcv_len < 0) {
@@ -206,6 +216,7 @@ char *read_content(char *buff_content_part, int sock) {
             }
         }
         strcat(content, buffer);
+        
         memset(buffer, 0, sizeof(buffer));
     } while ((rcv_len = read(sock, buffer, sizeof(buffer) - 1)) > 0);
 
@@ -274,6 +285,7 @@ void generate_report(char *buffer, int sock) {
             content = parsed;
         }
         printf("Dlugosc zasobu: %lu\n", strlen(content));
+        free(content);
     }
 }
 
@@ -334,6 +346,7 @@ int main(int argc, char *argv[]) {
     if (write(sock, request, send_len) != send_len) {
         syserr("partial / failed write");
     }
+    free(request);
 
     memset(buffer, 0, sizeof(buffer));
     rcv_len = read(sock, buffer, sizeof(buffer) - 1);
@@ -342,8 +355,8 @@ int main(int argc, char *argv[]) {
     }
 
     generate_report(buffer, sock);
+    close(sock);
     
-    free(request);
 
     return 0;
 }
