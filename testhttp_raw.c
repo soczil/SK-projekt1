@@ -353,14 +353,10 @@ char *parse_chunked_content(char *content) {
     size_t chunk_size = 0, sum = 0;
     char *parsed_content = NULL;
     char *start = NULL, *end = NULL;
-    bool end_of_chunk = false;
 
     parsed_content = (char *) malloc(content_len * sizeof(char));
     if (parsed_content == NULL) {
         syserr("malloc");
-    }
-    for (int i = 0; i < content_len; i++) {
-        parsed_content[i] = '\0';
     }
     parsed_content[0] = '\0';
 
@@ -378,14 +374,10 @@ char *parse_chunked_content(char *content) {
 
         start = end + 2;
         end = start;
-        end_of_chunk = false;
-        while (!end_of_chunk) {
+        end = strstr(end, "\r\n");
+        while ((end - start) < (ssize_t) chunk_size) {
+            end += 2;
             end = strstr(end, "\r\n");
-            if (is_hex_number(end + 2)) {
-                end_of_chunk = true;
-            } else {
-                end += 2;
-            }
         }
 
         *end = '\0';
@@ -393,19 +385,7 @@ char *parse_chunked_content(char *content) {
         *end = '\r';
         start = end + 2;
     }
-    // while ((end = strstr(start, "\r\n")) != NULL) {
-    //     if (is_hex_number(start)) {
-    //         chunk_size = strtoul(start, &start, 16);
-    //         if (chunk_size == 0) {
-    //             break;
-    //         }
-    //         sum += chunk_size;
-    //     } else {
-    //         *end = '\0';
-    //         strcat(parsed_content, start);
-    //     }
-    //     start = end + 2;
-    // }
+
     printf("%lu\n", sum);
 
     return parsed_content;
@@ -422,27 +402,21 @@ void generate_report(char *buffer, int sock) {
         printf("%s\n", buffer);
     } else {
         //puts(buffer);
+        char *content = read_content(end_of_header + 3, sock);
+        print_cookies(buffer);
         if (strcasestr(buffer, CHUNKED_MSG) != NULL) {
-            print_cookies(buffer);
             //printf("Dlugosc zasobu: %lu\n", count_size_chunked(end_of_header + 1, sock));
             // char *jol = parse_chunked_content(end_of_header + 1, sock);
             // printf("%s", jol);
             // printf("%lu\n", strlen(jol));
-            char *jol = read_content(end_of_header + 3, sock);
-            //printf("%s", jol);
-            puts("JOL");
-            puts("JOL");
-            puts("JOL");
-            puts("JOL");
-            puts("JOL");
-            puts("JOL");
-            puts("JOL");
-            puts("JOL");
-            puts("JOL");
-            size_t aaa = strlen(jol) + 1;
-            char *jol2 = parse_chunked_content(jol);
+            
+            // moze tu byc jakis error z valgrinda
+            char *parsed = parse_chunked_content(content);
+            free(content);
+            content = parsed;
+            
             //printf("%s\n", jol2);
-            printf("%lu\n", strlen(jol2));
+            //printf("%lu\n", strlen(content));
             // for (int i = 0; i < aaa; i++) {
             //     if (jol2[i] == '\0') {
             //         printf("NULL");
@@ -450,10 +424,8 @@ void generate_report(char *buffer, int sock) {
             //         printf("%c", jol2[i]);
             //     }
             // }
-        } else {
-            print_cookies(buffer);
-            printf("normal\n");
         }
+        printf("Dlugosc zasobu: %lu\n", strlen(content));
     }
 }
 
