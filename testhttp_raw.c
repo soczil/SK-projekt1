@@ -17,37 +17,6 @@
 
 #define CHUNKED_MSG "Transfer-Encoding: chunked"
 
-int check_address(char *arg) {
-    int i = 0;
-
-    while ((arg[i] != '\0') && (arg[i] != ':')) {
-        i++;
-    }
-
-    if ((arg[i] == '\0') || (i == 0)) {
-        fatal("wrong first argument");
-    }
-
-    return i;
-}
-
-int check_port_num(char *arg, int start) {
-    int i = start;
-
-    while (arg[i] != '\0') {
-        if ((arg[i] < '0') || (arg[i] > '9')) {
-            fatal("wrong port number");
-        }
-        i++;
-    }
-
-    if (i == start) {
-        fatal("wrong port number");
-    }
-
-    return (i - start);
-}
-
 int get_host_len(char *arg) {
     int i = 0;
 
@@ -142,14 +111,7 @@ char *build_request(char *address, char *file_name) {
         syserr("malloc");
     }
 
-    // sprintf(request, "GET %s HTTP/1.1\r\nHost: %s\r\nCookie: %s\r\nConnection: close\r\n\r\n", target, host, cookies);
     sprintf(request, "GET %s HTTP/1.1\r\nHost: %s\r\n", target, host);
-    // strcat(request, "GET ");
-    // strcat(request, target);
-    // strcat(request, " HTTP/1.1\r\n");
-    // strcat(request, "Host: ");
-    // strcat(request, host);
-    // strcat(request, "\r\n");
     if (file_size > 0) {
         strcat(request, "Cookie: ");
         strcat(request, cookies);
@@ -220,104 +182,6 @@ bool is_hex_number(char *str) {
     }
 
     return true;
-}
-
-ssize_t read_chunk_len(char *ptr) {
-    ssize_t result = 0;
-
-    if (is_hex_number(ptr)) {
-        result = strtoul(ptr, &ptr, 16);
-        return result;
-    }
-
-    return -1;
-}
-
-// char *parse_chunked_content(char *buff, int sock) {
-//     char buffer[BUFFER_SIZE];
-//     size_t chunk_size, sum = 0, content_len = 0;
-//     ssize_t rcv_len = 0;
-//     char *content = NULL, *start = NULL, *end = NULL;
-
-//     strcpy(buffer, buff);
-//     do {
-//         if (rcv_len < 0) {
-//             syserr("read");
-//         }
-
-//         start = buffer;
-//         printf("%s", start);
-//         while ((end = strstr(start, "\r\n")) != NULL) {
-//             end += 2; // przesuwamy za \r\n
-//             if (is_hex_number(end)) {
-//                 chunk_size = strtoul(end, &start, 16);
-//                 if (chunk_size == 0) {
-//                     break;
-//                 }
-//                 sum += chunk_size;
-//                 if (content_len < sum) {
-//                     content_len = (3 * sum) / 2;
-//                     content = (char *) realloc(content, content_len);
-//                 }
-//             } else {
-//                 start = end;
-//                 end = strstr(start, "\r\n");
-//                 if (end != NULL) {
-//                     *end = '\0';
-//                 }
-
-//                 strcat(content, start);
-
-//                 if (end != NULL) {
-//                     *end = '\r';
-//                     start = end;
-//                 }
-//             }
-//         }
-//         if (start == buffer) {
-//             strcat(content, start);
-//         }
-
-//         memset(buffer, 0, sizeof(buffer));
-//         strcat(buffer, "\r\n");
-//     } while ((rcv_len = read(sock, buffer + 2, sizeof(buffer) - 3)) > 0);
-
-//     printf("\n\n%lu\n\n", sum);
-
-//     return content;
-// }
-
-size_t count_size_chunked(char *content, int sock) {
-    char buffer[BUFFER_SIZE];
-    size_t chunk_size = 0, sum = 0;
-    ssize_t rcv_len = 0;
-    char *number_start = NULL, *number_end = NULL;
-    strcpy(buffer, content);
-
-    do {
-        //printf("%s\n", buffer);
-        if (rcv_len < 0) {
-            syserr("read");
-        }
-
-        number_end = buffer;
-        while ((number_start = strstr(number_end, "\r\n")) != NULL) {
-            number_start += 2;
-            if (is_hex_number(number_start)) {
-                chunk_size = strtoul(number_start, &number_end, 16);
-                if (chunk_size == 0) {
-                    break;
-                }
-                sum += chunk_size;
-            }
-            number_end++;
-        }
-
-        memset(buffer, 0, sizeof(buffer));
-        strcat(buffer, "\r\n");
-    } while ((rcv_len = read(sock, buffer + 2, sizeof(buffer) - 3)) > 0);
-
-    return sum;
 }
 
 char *read_content(char *buff_content_part, int sock) {
@@ -395,43 +259,42 @@ void generate_report(char *buffer, int sock) {
     char *end_of_header = strstr(buffer, "\r\n\r\n");
     end_of_header++;
     *end_of_header = '\0';
-    //puts(buffer);
+
     if (strncmp(buffer, CORRECT_RESPONSE, CORRECT_RESPONSE_LEN) != 0) {
         char *info_end = strstr(buffer, "\r\n");
         *info_end = '\0';
         printf("%s\n", buffer);
     } else {
-        //puts(buffer);
         char *content = read_content(end_of_header + 3, sock);
         print_cookies(buffer);
-        if (strcasestr(buffer, CHUNKED_MSG) != NULL) {
-            //printf("Dlugosc zasobu: %lu\n", count_size_chunked(end_of_header + 1, sock));
-            // char *jol = parse_chunked_content(end_of_header + 1, sock);
-            // printf("%s", jol);
-            // printf("%lu\n", strlen(jol));
-            
+        if (strcasestr(buffer, CHUNKED_MSG) != NULL) {  
             // moze tu byc jakis error z valgrinda
             char *parsed = parse_chunked_content(content);
             free(content);
             content = parsed;
-            
-            //printf("%s\n", jol2);
-            //printf("%lu\n", strlen(content));
-            // for (int i = 0; i < aaa; i++) {
-            //     if (jol2[i] == '\0') {
-            //         printf("NULL");
-            //     } else {
-            //         printf("%c", jol2[i]);
-            //     }
-            // }
         }
         printf("Dlugosc zasobu: %lu\n", strlen(content));
     }
 }
 
+char *get_port_num(char *arg) {
+    char *result = arg;
+
+    while ((*result != '\0') && (*result != ':')) {
+        result++;
+    }
+
+    if (*result == '\0') {
+        fatal("port number missing");
+    }
+    *result = '\0';
+
+    return (result + 1);
+}
+
 int main(int argc, char *argv[]) {
-    int sock, err, address_len, port_num_len;
-    char *address = NULL, *port_str = NULL, *request = NULL;
+    int sock, err;
+    char *request = NULL;
     char buffer[BUFFER_SIZE];
     struct addrinfo addr_hints;
     struct addrinfo *addr_result;
@@ -441,30 +304,13 @@ int main(int argc, char *argv[]) {
         fatal("wrong number of arguments");
     }
 
-    address_len = check_address(argv[1]);
-    port_num_len = check_port_num(argv[1], address_len + 1);
-
-    address = (char *) malloc((address_len * sizeof(char)) + 1);
-    if (address == NULL) {
-        syserr("malloc");
-    }
-
-    port_str = (char *) malloc((port_num_len * sizeof(char)) + 1);
-    if (port_str == NULL) {
-        syserr("malloc");
-    }
-
-    if (sscanf(argv[1], "%[^:]:%s", address, port_str) != 2) {
-        fatal("wrong first argument");
-    }
-
     // Upewnij się, że struktura jest wyzerowana.
     memset(&addr_hints, 0, sizeof(struct addrinfo));
     addr_hints.ai_family = AF_INET; // IPv4
     addr_hints.ai_socktype = SOCK_STREAM;
     addr_hints.ai_protocol = IPPROTO_TCP;
 
-    err = getaddrinfo(address, port_str, &addr_hints, &addr_result);
+    err = getaddrinfo(argv[1], get_port_num(argv[1]), &addr_hints, &addr_result);
     if (err == EAI_SYSTEM) {
         syserr("getaddrinfo: %s", gai_strerror(err));
     } else if (err != 0) {
@@ -495,20 +341,8 @@ int main(int argc, char *argv[]) {
         syserr("read");
     }
 
-    //printf("%s", buffer);
     generate_report(buffer, sock);
     
-    // while ((rcv_len = read(sock, buffer, sizeof(buffer) - 1)) > 0) {
-    //     printf("%s\n", buffer);
-    //     memset(buffer, 0, sizeof(buffer) - 1);
-    // }
-
-    // read(sock, buffer, sizeof(buffer) - 1);
-    // printf("%s", buffer);
-
-
-    free(address);
-    free(port_str);
     free(request);
 
     return 0;
