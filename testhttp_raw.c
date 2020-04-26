@@ -267,6 +267,7 @@ char *parse_chunked_content(char *content) {
 }
 
 void generate_report(char *buffer, int sock) {
+    char *encoding = NULL;
     char *end_of_header = strstr(buffer, "\r\n\r\n");
     end_of_header++;
     *end_of_header = '\0';
@@ -278,11 +279,16 @@ void generate_report(char *buffer, int sock) {
     } else {
         char *content = read_content(end_of_header + 3, sock);
         print_cookies(buffer);
-        if (strcasestr(buffer, CHUNKED_MSG) != NULL) {  
-            // moze tu byc jakis error z valgrinda
-            char *parsed = parse_chunked_content(content);
-            free(content);
-            content = parsed;
+        // ZMIENIANE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        if ((encoding = strcasestr(buffer, "Transfer-Encoding:")) != NULL) {  
+            char *new_line = strchr(encoding, '\n');
+            *new_line = '\0';
+            if (strcasestr(encoding, "chunked") != NULL) {
+                char *parsed = parse_chunked_content(content);
+                free(content);
+                content = parsed;
+            }
+            *new_line = '\n';
         }
         printf("Dlugosc zasobu: %lu\n", strlen(content));
         free(content);
