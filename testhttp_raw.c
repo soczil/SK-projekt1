@@ -17,8 +17,6 @@
 #define CORRECT_RESPONSE "HTTP/1.1 200 OK"
 #define CORRECT_RESPONSE_LEN 15
 
-#define CHUNKED_MSG "Transfer-Encoding: chunked"
-
 int get_host_len(char *arg) {
     int i = 0;
 
@@ -103,13 +101,12 @@ char *build_request(char *address, char *file_name) {
     char host[host_len + 1];
     char target[target_len + 1];
     char *request = NULL;
-    int request_len = 8192;
     
     if (sscanf(address_suff, "%[^/]%s", host, target) != 2) {
         fatal("wrong third argument");
     }
 
-    request = (char *) malloc(request_len * sizeof(char));
+    request = (char *) malloc(BUFFER_SIZE * sizeof(char));
     if (request == NULL) {
         syserr("malloc");
     }
@@ -130,27 +127,20 @@ char *build_request(char *address, char *file_name) {
 void print_cookies(char *header) {
     char *cookie = strcasestr(header, "Set-Cookie");
     char *end_of_cookie = NULL;
-    int cookie_counter = 0;
-    char cookies[strlen(header)]; // Jakies lepsze oszacowanie moze!!!!!!!!
+    char sign;
 
-    memset(cookies, 0, sizeof(cookies));
     while (cookie != NULL) {
-        cookie_counter++;
         cookie += 12;   // JAKIS DEFINE!!!!!!!!!!
         end_of_cookie = cookie;
         while ((*end_of_cookie != ';') && (*end_of_cookie != '\r')) {
             end_of_cookie++;
         }
+        sign = *end_of_cookie;
         *end_of_cookie = '\0';
-        strcat(cookies, cookie);
-        strcat(cookies, "\n");
+        printf("%s\n", cookie);
+        *end_of_cookie = sign;
         cookie = end_of_cookie + 1;
         cookie = strcasestr(cookie, "Set-Cookie");
-    }
-
-    printf("%d\n", cookie_counter);
-    if (cookie_counter > 0) {
-        printf("%s", cookies);
     }
 }
 
@@ -220,6 +210,8 @@ char *read_content(char *buff_content_part, int sock) {
         memset(buffer, 0, sizeof(buffer));
     } while ((rcv_len = read(sock, buffer, sizeof(buffer) - 1)) > 0);
 
+    //puts(content);
+
     return content;
 }
 
@@ -269,21 +261,22 @@ char *parse_chunked_content(char *content) {
 void generate_report(char *buffer, int sock) {
     char *encoding = NULL;
     char *end_of_header = strstr(buffer, "\r\n\r\n");
-    end_of_header++;
+    end_of_header += 3;
     *end_of_header = '\0';
+    //puts(buffer);
 
     if (strncmp(buffer, CORRECT_RESPONSE, CORRECT_RESPONSE_LEN) != 0) {
         char *info_end = strstr(buffer, "\r\n");
         *info_end = '\0';
         printf("%s\n", buffer);
     } else {
-        char *content = read_content(end_of_header + 3, sock);
+        char *content = read_content(end_of_header + 1, sock);
         print_cookies(buffer);
         // ZMIENIANE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         if ((encoding = strcasestr(buffer, "Transfer-Encoding:")) != NULL) {  
             char *new_line = strchr(encoding, '\n');
             *new_line = '\0';
-            if (strcasestr(encoding, "chunked") != NULL) {
+            if (strstr(encoding, "chunked") != NULL) {
                 char *parsed = parse_chunked_content(content);
                 free(content);
                 content = parsed;
@@ -302,7 +295,7 @@ char *get_port_num(char *arg) {
         result++;
     }
 
-    if (*result == '\0') {
+    if ((*result == '\0') || (*(result + 1) == '\0')) {
         fatal("port number missing");
     }
     *result = '\0';
@@ -362,7 +355,6 @@ int main(int argc, char *argv[]) {
 
     generate_report(buffer, sock);
     close(sock);
-    
 
     return 0;
 }
