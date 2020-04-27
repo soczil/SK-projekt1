@@ -12,11 +12,15 @@
 #include "err.h"
 
 #define BUFFER_SIZE 8192 // 8 kb
+#define COOKIES_BUFFER_SIZE 4096 // 4kb
 #define SET_COOKIE_LEN 11 // Długość nagłówka 'Set-Cookie:'.
 
-#define CORRECT_RESPONSE "HTTP/1.1 200 OK"
-#define CORRECT_RESPONSE_LEN 15
+#define OK_RESPONSE "HTTP/1.1 200 OK"
+#define OK_RESPONSE_LEN 15
 
+/**
+ * Daje w wyniku długość adresu serwera, z którego będziemy ściągać zasób.
+ */
 int get_host_len(char *arg) {
     int i = 0;
 
@@ -31,6 +35,9 @@ int get_host_len(char *arg) {
     return i;
 }
 
+/**
+ * Daje w wyniku długość wskazania zasobu do pobrania.
+ */
 int get_target_len(char *arg, int start) {
     int i = start;
 
@@ -46,29 +53,27 @@ int get_target_len(char *arg, int start) {
 }
 
 /**
- * Oblicza rozmiar pliku i podaje go w liczbie charów.
- */
-int get_file_size_in_chars(FILE *file) {
-    fseek(file, 0L, SEEK_END);
-    int size = ftell(file);
-    rewind(file);
-    return (size / sizeof(char));
-}
-
-/**
  * Buduje nagłówek z ciasteczkami ('Cookie') na podstawie podanego pliku.
  */
 void get_cookies_header(FILE *file, char *cookies) {
     char *line = NULL;
-    size_t size = 0;
+    size_t size = 0, sum = 0;
     int line_size = 0;
 
     while ((line_size = getline(&line, &size, file)) != -1) {
         if (line[line_size - 1] == '\n') {
             line[line_size - 1] = ';';
+            sum += (line_size + 1); // Długość ciasteczka + spacja.
+        } else {
+            sum += (line_size + 2); // Długość ciasteczka + średnik + spacja.
         }
-        strcat(cookies, line);
 
+        if (sum > (COOKIES_BUFFER_SIZE - 1)) {
+            // Więcej ciasteczek nie zmieści się do bufora.
+            break;
+        }
+
+        strcat(cookies, line);
         if (line[line_size - 1] != ';') {
             strcat(cookies, ";");
         }
@@ -76,7 +81,10 @@ void get_cookies_header(FILE *file, char *cookies) {
     }
 
     char *last_space = strrchr(cookies, ' ');
-    *last_space = '\0';
+    if (last_space != NULL) {
+        *last_space = '\0';
+    }
+
     free(line);
 }
 
@@ -98,8 +106,7 @@ char *build_request(char *address, char *file_name) {
         fatal("couldn't open file %s", file_name);
     }
 
-    int file_size = get_file_size_in_chars(file);
-    char cookies[file_size + ((file_size + 1) / 3)];
+    char cookies[COOKIES_BUFFER_SIZE];
     memset(cookies, 0, sizeof(cookies));
     get_cookies_header(file, cookies);
 
@@ -121,9 +128,10 @@ char *build_request(char *address, char *file_name) {
     if (request == NULL) {
         syserr("malloc");
     }
+    request[0] = '\0';
 
     sprintf(request, "GET %s HTTP/1.1\r\nHost: %s\r\n", target, host);
-    if (file_size > 0) {
+    if (cookies[0] != 0) {
         strcat(request, "Cookie: ");
         strcat(request, cookies);
         strcat(request, "\r\n");
@@ -131,6 +139,8 @@ char *build_request(char *address, char *file_name) {
     strcat(request, "Connection: close\r\n");
     strcat(request, "\r\n");
     
+    printf("%s\n", request);
+
     return request;
 }
 
@@ -144,7 +154,8 @@ void print_cookies(char *header) {
 
     while (cookie != NULL) {
         cookie += SET_COOKIE_LEN;
-        while ((*cookie != '\r') && (isspace(*cookie) != 0)) {
+        // Przesuń za białe znaki.
+        while ((*cookie != '\0') && (isspace(*cookie) != 0)) {
             cookie++;
         }
         end_of_cookie = cookie;
@@ -178,10 +189,12 @@ bool is_hex_number(char *str) {
     }
 
     if (i == 0) {
+        // Napis str jest pusty.
         return false;
     }
 
     if ((str[i] == '\r') && (str[i + 1] != '\n')) {
+        // Po znaku '\r' nie ma znaku nowej linii.
         return false;
     }
 
@@ -189,6 +202,7 @@ bool is_hex_number(char *str) {
         ptr = strchr(str, '\n');
         ptr--;
         if (*ptr != '\r') {
+            // Linia nie kończy się CRLF.
             return false;
         }
     }
@@ -210,7 +224,7 @@ char *read_content(char *buff_content_part, int sock) {
     if (content == NULL) {
         syserr("malloc");
     }
-    content[0] = '\0';
+    content[0] = '\0'; // Żeby strcat nie miał problemów.
 
     buffer[0] = '\0';
     strcpy(buffer, buff_content_part);
@@ -248,7 +262,7 @@ char *parse_chunked_content(char *content) {
     if (parsed_content == NULL) {
         syserr("malloc");
     }
-    parsed_content[0] = '\0';
+    parsed_content[0] = '\0'; // Żeby strcat nie miał problemów.
 
     start = content;
     while ((end = strstr(start, "\r\n")) != NULL) {
@@ -266,6 +280,7 @@ char *parse_chunked_content(char *content) {
         end = start;
         end = strstr(end, "\r\n");
         while ((end - start) < (ssize_t) chunk_size) {
+            // Dopóki rozmiar jest mniejszy od podanego rozmiaru chunka.
             end += 2;
             end = strstr(end, "\r\n");
         }
@@ -289,16 +304,16 @@ void generate_report(char *buffer, int sock) {
     char *encoding = NULL;
     char *end_of_header = strstr(buffer, "\r\n\r\n");
     end_of_header += 3;
-    *end_of_header = '\0';
+    *end_of_header = '\0'; // Żeby wyszukiwać pola tylko w headerze.
 
-    if (strncmp(buffer, CORRECT_RESPONSE, CORRECT_RESPONSE_LEN) != 0) {
+    if (strncmp(buffer, OK_RESPONSE, OK_RESPONSE_LEN) != 0) {
+        // Status odpowiedzi jest inny niż 200 OK.
         char *info_end = strstr(buffer, "\r\n");
         *info_end = '\0';
         printf("%s\n", buffer);
     } else {
         char *content = read_content(end_of_header + 1, sock);
         print_cookies(buffer);
-        // ZMIENIANE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         if ((encoding = strcasestr(buffer, "Transfer-Encoding:")) != NULL) {  
             char *new_line = strchr(encoding, '\n');
             *new_line = '\0';
