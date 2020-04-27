@@ -11,14 +11,13 @@ HTTP_PORT = '80'
 HTTPS_PREF = 'https://'
 HTTPS_PORT = '443'
 
-LOCALHOST = '127.0.0.1'
-LOCAL_PORT = '3333'
+LOCALHOST = '127.0.0.1:3333'
 
-TEMPLATE = 'pid =\nforeground = yes\noutput = /dev/stdout\n[service]\nclient = yes\naccept = ' + LOCALHOST + ':' + LOCAL_PORT
+TEMPLATE = 'pid =\nforeground = yes\noutput = /dev/stdout\n[service]\nclient = yes\naccept = ' + LOCALHOST
 FILE_NAME = 'config.txt'
 
 def fatal(message):
-    print(message, file=sys.stderr)
+    print('ERROR: ' + message, file=sys.stderr)
     sys.exit(1)
 
 def get_server(prefix):
@@ -27,8 +26,15 @@ def get_server(prefix):
         x = address.index('/')
         server = address[:x]
         port = server.find(':')
-        if port != -1:
-            server = server[:port]
+        # W razie potrzeby dodaj domyślny port.
+        if port == -1:
+            server = server + ':'
+        port = server[(server.find(':') + 1):]
+        if not port:
+            if prefix == HTTP_PREF:
+                server = server + HTTP_PORT
+            elif prefix == HTTPS_PREF:
+                server = server + HTTPS_PORT
     except:
         fatal('Wrong argument')
     return server
@@ -44,20 +50,20 @@ def signal_handler(sig, frame):
         pass
     sys.exit(1)
 
-def connect(server, port):
-    address = server + ':' + port
-    subprocess.call(['./testhttp_raw', address, sys.argv[1], sys.argv[2]])
+def connect(server):
+    subprocess.call(['./testhttp_raw', server, sys.argv[1], sys.argv[2]])
 
 def make_config_file(server):
     config_file = open(FILE_NAME, 'w')
     print(TEMPLATE, file=config_file)
-    print('connect = ' + server + ':' + HTTPS_PORT, file=config_file)
+    print('connect = ' + server, file=config_file)
     config_file.close()
 
 signal.signal(signal.SIGINT, signal_handler)
 
 if len(sys.argv) != 3:
     fatal('Wrong number of arguments')
+
 
 # Sprawdź, czy plik z ciasteczkami istnieje.
 if not os.path.isfile(sys.argv[1]):
@@ -73,11 +79,17 @@ if sys.argv[2].startswith(HTTPS_PREF):
             break
         if line.find('Configuration successful'):
             break
-    connect(LOCALHOST, LOCAL_PORT)
-    stunnel.kill()
-    os.remove(FILE_NAME)
+    connect(LOCALHOST)
+    try:
+        stunnel.kill()
+    except:
+        pass
+    try:
+        os.remove(FILE_NAME)
+    except:
+        pass
 elif sys.argv[2].startswith(HTTP_PREF):
     server = get_server(HTTP_PREF)
-    connect(server, HTTP_PORT)
+    connect(server)
 else:
     fatal('Wrong argument')

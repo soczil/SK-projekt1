@@ -139,8 +139,6 @@ char *build_request(char *address, char *file_name) {
     strcat(request, "Connection: close\r\n");
     strcat(request, "\r\n");
     
-    printf("%s\n", request);
-
     return request;
 }
 
@@ -291,7 +289,7 @@ char *parse_chunked_content(char *content) {
         start = end + 2;
     }
 
-    printf("%lu\n", sum);
+    //printf("%lu\n", sum);
 
     return parsed_content;
 }
