@@ -8,11 +8,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdbool.h>
+#include <ctype.h>
 #include "err.h"
 
-#define METHOD_LEN 3
-#define HTTP_VERSION_LEN 8
 #define BUFFER_SIZE 8192 // 8 kb
+#define SET_COOKIE_LEN 11 // Długość nagłówka 'Set-Cookie:'.
 
 #define CORRECT_RESPONSE "HTTP/1.1 200 OK"
 #define CORRECT_RESPONSE_LEN 15
@@ -45,6 +45,9 @@ int get_target_len(char *arg, int start) {
     return (i - start);
 }
 
+/**
+ * Oblicza rozmiar pliku i podaje go w liczbie charów.
+ */
 int get_file_size_in_chars(FILE *file) {
     fseek(file, 0L, SEEK_END);
     int size = ftell(file);
@@ -52,6 +55,9 @@ int get_file_size_in_chars(FILE *file) {
     return (size / sizeof(char));
 }
 
+/**
+ * Buduje nagłówek z ciasteczkami ('Cookie') na podstawie podanego pliku.
+ */
 void get_cookies_header(FILE *file, char *cookies) {
     char *line = NULL;
     size_t size = 0;
@@ -74,6 +80,9 @@ void get_cookies_header(FILE *file, char *cookies) {
     free(line);
 }
 
+/**
+ * Buduje zapytanie, które następnie wysyłane jest do serwera.
+ */
 char *build_request(char *address, char *file_name) {
     size_t address_len = strlen(address);
     char address_suff[address_len + 1];
@@ -94,7 +103,9 @@ char *build_request(char *address, char *file_name) {
     memset(cookies, 0, sizeof(cookies));
     get_cookies_header(file, cookies);
 
-    fclose(file); // Tu trzeba obsluzyc blad!!!!!!!!!!!!!!!!!!!
+    if (fclose(file)) {
+        syserr("close file");
+    }
 
     int host_len = get_host_len(address_suff);
     int target_len = get_target_len(address_suff, host_len);
@@ -123,14 +134,19 @@ char *build_request(char *address, char *file_name) {
     return request;
 }
 
-// Wywoływać dopiero, gdy już nie będzie nam potrzebny header.
+/**
+ * Wypisuje na standardowe wyjście otrzymane w odpowiedzi ciasteczka.
+ */
 void print_cookies(char *header) {
     char *cookie = strcasestr(header, "Set-Cookie");
     char *end_of_cookie = NULL;
     char sign;
 
     while (cookie != NULL) {
-        cookie += 12;   // JAKIS DEFINE!!!!!!!!!!
+        cookie += SET_COOKIE_LEN;
+        while ((*cookie != '\r') && (isspace(*cookie) != 0)) {
+            cookie++;
+        }
         end_of_cookie = cookie;
         while ((*end_of_cookie != ';') && (*end_of_cookie != '\r')) {
             end_of_cookie++;
@@ -144,6 +160,9 @@ void print_cookies(char *header) {
     }
 }
 
+/**
+ * Sprawdza, czy podany ciąg znaków jest liczbą szesnastkową.
+ */
 bool is_hex_number(char *str) {
     int i = 0;
     char *ptr = NULL;
@@ -177,6 +196,9 @@ bool is_hex_number(char *str) {
     return true;
 }
 
+/**
+ * Wczytuje odbieraną zawartość strony.
+ */
 char *read_content(char *buff_content_part, int sock) {
     size_t sum = strlen(buff_content_part) + 1;
     size_t content_len = (3 * sum) / 2;
@@ -210,11 +232,12 @@ char *read_content(char *buff_content_part, int sock) {
         memset(buffer, 0, sizeof(buffer));
     } while ((rcv_len = read(sock, buffer, sizeof(buffer) - 1)) > 0);
 
-    //puts(content);
-
     return content;
 }
 
+/**
+ * Parsuje odebraną zawartość strony (chunked).
+ */
 char *parse_chunked_content(char *content) {
     size_t content_len = strlen(content) + 1;
     size_t chunk_size = 0, sum = 0;
@@ -258,12 +281,15 @@ char *parse_chunked_content(char *content) {
     return parsed_content;
 }
 
+/**
+ * Generuje raport: woła funkcje odpowiedzialne za czytanie zawartości strony,
+ * wypisywanie ciasteczek i ewentualnie parsowanie odpowiedzi chunked.
+ */
 void generate_report(char *buffer, int sock) {
     char *encoding = NULL;
     char *end_of_header = strstr(buffer, "\r\n\r\n");
     end_of_header += 3;
     *end_of_header = '\0';
-    //puts(buffer);
 
     if (strncmp(buffer, CORRECT_RESPONSE, CORRECT_RESPONSE_LEN) != 0) {
         char *info_end = strstr(buffer, "\r\n");
@@ -276,7 +302,7 @@ void generate_report(char *buffer, int sock) {
         if ((encoding = strcasestr(buffer, "Transfer-Encoding:")) != NULL) {  
             char *new_line = strchr(encoding, '\n');
             *new_line = '\0';
-            if (strstr(encoding, "chunked") != NULL) {
+            if (strcasestr(encoding, "chunked") != NULL) {
                 char *parsed = parse_chunked_content(content);
                 free(content);
                 content = parsed;
@@ -288,6 +314,10 @@ void generate_report(char *buffer, int sock) {
     }
 }
 
+/**
+ * Ustawia znak końca napisu na znaku ':' i daje w wyniku wskaźnik
+ * na pierwszy znak portu.
+ */
 char *get_port_num(char *arg) {
     char *result = arg;
 
@@ -354,7 +384,10 @@ int main(int argc, char *argv[]) {
     }
 
     generate_report(buffer, sock);
-    close(sock);
+
+    if (close(sock) < 0) {
+        syserr("close");
+    }
 
     return 0;
 }

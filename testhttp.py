@@ -26,9 +26,11 @@ def get_server(prefix):
     try:
         x = address.index('/')
         server = address[:x]
+        port = server.find(':')
+        if port != -1:
+            server = server[:port]
     except:
         fatal('Wrong argument')
-    
     return server
 
 def signal_handler(sig, frame):
