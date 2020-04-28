@@ -11,7 +11,7 @@ HTTP_PORT = '80'
 HTTPS_PREF = 'https://'
 HTTPS_PORT = '443'
 
-LOCALHOST = '127.0.0.1:3333'
+LOCALHOST = '127.0.0.1:18081'
 
 TEMPLATE = 'pid =\nforeground = yes\noutput = /dev/stdout\n[service]\nclient = yes\naccept = ' + LOCALHOST
 FILE_NAME = 'config.txt'
@@ -48,6 +48,10 @@ def signal_handler(sig, frame):
         stunnel.kill()
     except:
         pass
+    try:
+        fnull.close()
+    except:
+        pass
     sys.exit(1)
 
 def connect(server):
@@ -72,7 +76,8 @@ if not os.path.isfile(sys.argv[1]):
 if sys.argv[2].startswith(HTTPS_PREF):
     server = get_server(HTTPS_PREF)
     make_config_file(server)
-    stunnel = subprocess.Popen(['stunnel', FILE_NAME], stdout=subprocess.PIPE, universal_newlines=True)
+    fnull = open(os.devnull, 'w')
+    stunnel = subprocess.Popen(['stunnel', FILE_NAME], stderr=fnull, stdout=subprocess.PIPE, universal_newlines=True)
     while True:
         line = stunnel.stdout.readline()
         if not line:
@@ -80,14 +85,9 @@ if sys.argv[2].startswith(HTTPS_PREF):
         if line.find('Configuration successful'):
             break
     connect(LOCALHOST)
-    try:
-        stunnel.kill()
-    except:
-        pass
-    try:
-        os.remove(FILE_NAME)
-    except:
-        pass
+    stunnel.kill()
+    os.remove(FILE_NAME)
+    fnull.close()
 elif sys.argv[2].startswith(HTTP_PREF):
     server = get_server(HTTP_PREF)
     connect(server)

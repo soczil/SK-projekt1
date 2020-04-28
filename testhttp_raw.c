@@ -68,7 +68,7 @@ void get_cookies_header(FILE *file, char *cookies) {
             sum += (line_size + 2); // Długość ciasteczka + średnik + spacja.
         }
 
-        if (sum > (COOKIES_BUFFER_SIZE - 1)) {
+        if (sum > COOKIES_BUFFER_SIZE) {
             // Więcej ciasteczek nie zmieści się do bufora.
             break;
         }
@@ -80,9 +80,9 @@ void get_cookies_header(FILE *file, char *cookies) {
         strcat(cookies, " ");
     }
 
-    char *last_space = strrchr(cookies, ' ');
-    if (last_space != NULL) {
-        *last_space = '\0';
+    char *last_semi = strrchr(cookies, ';');
+    if (last_semi != NULL) {
+        *last_semi = '\0';
     }
 
     free(line);
@@ -106,7 +106,7 @@ char *build_request(char *address, char *file_name) {
         fatal("couldn't open file %s", file_name);
     }
 
-    char cookies[COOKIES_BUFFER_SIZE];
+    char cookies[COOKIES_BUFFER_SIZE + 1];
     memset(cookies, 0, sizeof(cookies));
     get_cookies_header(file, cookies);
 
@@ -157,7 +157,8 @@ void print_cookies(char *header) {
             cookie++;
         }
         end_of_cookie = cookie;
-        while ((*end_of_cookie != ';') && (*end_of_cookie != '\r')) {
+        while ((*end_of_cookie != ';') && (*end_of_cookie != '\r')
+               && (*end_of_cookie != ',')) {
             end_of_cookie++;
         }
         sign = *end_of_cookie;
@@ -289,8 +290,6 @@ char *parse_chunked_content(char *content) {
         start = end + 2;
     }
 
-    //printf("%lu\n", sum);
-
     return parsed_content;
 }
 
@@ -301,6 +300,9 @@ char *parse_chunked_content(char *content) {
 void generate_report(char *buffer, int sock) {
     char *encoding = NULL;
     char *end_of_header = strstr(buffer, "\r\n\r\n");
+    if (end_of_header == NULL) {
+        fatal("could not read whole header");
+    }
     end_of_header += 3;
     *end_of_header = '\0'; // Żeby wyszukiwać pola tylko w headerze.
 
@@ -349,7 +351,7 @@ char *get_port_num(char *arg) {
 int main(int argc, char *argv[]) {
     int sock, err;
     char *request = NULL;
-    char buffer[BUFFER_SIZE];
+    char buffer[BUFFER_SIZE + 1];
     struct addrinfo addr_hints;
     struct addrinfo *addr_result;
     ssize_t send_len, rcv_len;

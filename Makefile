@@ -1,7 +1,7 @@
 TARGET: testhttp_raw
 
 CC = cc
-CFLAGS = -Wall -Wextra -pedantic -O2
+CFLAGS = -Wall -O2
 LFLAGS = -Wall
 
 testhttp_raw.o err.o: err.h
